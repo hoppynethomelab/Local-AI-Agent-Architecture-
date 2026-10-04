@@ -3,25 +3,68 @@
 ## Branches and working directories
 
 - `main` is the stable branch. The production working directory at
-  `/opt/local_ai_agent_prod` should check out this branch.
-- `dev` is the development branch based on `main`. The development working
-  directory at `/opt/local_ai_agent_dev` should check out this branch.
+  `/opt/local_ai_agent_prod` checks out this branch after a successful deployment.
+- `dev` is the shared development branch based on `main`. The development
+  working directory at `/opt/local_ai_agent_dev` should check out this branch.
+- Create short-lived feature branches from `dev`, then open pull requests into
+  `dev`. Merge tested feature work into `dev`; promote `dev` to `main` through
+  a pull request when it is ready for release.
 - Treat “master” as an informal reference to `main`; do not create a separate
   `master` branch.
 
-## Change and release flow
+## Continuous integration and merge requirements
 
-1. Make and test changes on `dev`.
-2. Push `dev` to the configured Git remote.
-3. Open a pull request from `dev` into `main`.
-4. Require the CI checks to pass before merging.
-5. After the merge, update the production working directory from `main`.
+1. Create a feature branch from `dev`, make changes, and run the relevant
+   tests locally.
+2. Push the feature branch and open a pull request into `dev`. Review and merge
+   only after its CI checks pass.
+3. When the development branch is release-ready, open a pull request from
+   `dev` into `main`.
+4. Require the `Repository checks` status from `.github/workflows/ci.yml` to
+   pass before merging. Do not push directly to `main`.
+5. Merge the pull request; the production deployment workflow then updates
+   `/opt/local_ai_agent_prod` from that exact `main` revision.
 
-The CI workflow currently runs the repository's documentation smoke tests on
-pushes to `dev` and `main`, and on pull requests targeting `main`. As application
-code and tests are added, extend the checks to run the relevant linters, builds,
-and test suites.
+The CI workflow currently checks that the project documentation exists and is
+non-empty, checks patch whitespace, and compiles/runs pytest when Python source
+and tests are present. When application code is introduced, add its required
+dependencies, linters, build steps, and test suites to CI before treating the
+checks as sufficient for that code.
 
-No Git remote is configured yet, so pushing, pull requests, and hosted CI will
-become available after a remote is added. Branch protection and production
-deployment also need to be configured at the hosting provider.
+## Production deployment setup
+
+`.github/workflows/deploy-production.yml` deploys only after a push to `main`.
+It uses a GitHub-hosted runner over SSH to send a Git bundle and fast-forward
+the server checkout at `/opt/local_ai_agent_prod`. It refuses to overwrite a
+non-empty directory that is not already a Git checkout, and refuses to deploy
+if the production checkout is on another branch or cannot fast-forward.
+
+Before the first deployment:
+
+1. Confirm the GitHub-hosted runner can reach the server over SSH.
+2. Create a GitHub Actions environment named `production` and configure these
+   environment secrets:
+   - `PROD_SSH_HOST`: server hostname or address.
+   - `PROD_SSH_USER`: SSH account with permission to update the production
+     directory.
+   - `PROD_SSH_PRIVATE_KEY`: private key for that account.
+   - `PROD_SSH_KNOWN_HOSTS`: verified `known_hosts` entry for the server. Verify
+     the host key fingerprint through a trusted channel; do not trust an
+     unverified key scan.
+3. Ensure Git is installed on the server and the SSH account can write to
+   `/opt/local_ai_agent_prod`.
+
+## Repository settings to enable
+
+Configure branch rules for `main` on GitHub to require pull requests and the
+`Repository checks` status before merging, disallow force pushes and deletion,
+and restrict updates to pull requests. Apply the same required status check to
+`dev` so feature branches are tested before joining the shared development
+branch. Restrict the release pull request's base to `main` and its source to
+`dev` as a team convention. The CI workflow runs on pushes to `dev` and `main`
+and on pull requests targeting either branch.
+
+GitHub branch protection/rulesets are repository settings, not files in this
+checkout, so they must be enabled in the repository's GitHub settings. At this
+stage the repository contains documentation rather than application code;
+the current CI smoke checks do not substitute for application tests.

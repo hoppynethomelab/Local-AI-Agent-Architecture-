@@ -1,0 +1,95 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy main to production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out deployed revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate deployment secrets
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          if [ -z "$PROD_SSH_HOST" ] || \
+             [ -z "$PROD_SSH_USER" ] || \
+             [ -z "$PROD_SSH_PRIVATE_KEY" ] || \
+             [ -z "$PROD_SSH_KNOWN_HOSTS" ]; then
+            echo "::error::Configure PROD_SSH_HOST, PROD_SSH_USER, PROD_SSH_PRIVATE_KEY, and PROD_SSH_KNOWN_HOSTS in the production environment"
+            exit 1
+          fi
+
+      - name: Prepare SSH and repository bundle
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          install -m 700 -d "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id"
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/deploy-ssh/id" "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          git bundle create "$RUNNER_TEMP/repository.bundle" main
+
+      - name: Deploy main to production directory
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -eu
+          ssh_options=(
+            -i "$RUNNER_TEMP/deploy-ssh/id"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts"
+          )
+          destination="$PROD_SSH_USER@$PROD_SSH_HOST"
+          bundle_path="/tmp/local-ai-agent-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bundle"
+
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/repository.bundle" "$destination:$bundle_path"
+          ssh "${ssh_options[@]}" "$destination" bash -s -- "$bundle_path" <<'REMOTE'
+          set -eu
+          bundle_path=$1
+          target=/opt/local_ai_agent_prod
+          trap 'rm -f "$bundle_path"' EXIT
+
+          if [ ! -d "$target/.git" ]; then
+            if [ -n "$(find "$target" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+              echo "Production directory is not empty and is not a Git checkout: $target" >&2
+              exit 1
+            fi
+            git clone --branch main "$bundle_path" "$target"
+            git -C "$target" remote set-url origin https://github.com/hoppynethomelab/Local-AI-Agent-Architecture-.git
+          else
+            current_branch=$(git -C "$target" branch --show-current)
+            if [ "$current_branch" != main ]; then
+              echo "Production checkout is on '$current_branch', expected 'main'" >&2
+              exit 1
+            fi
+            git -C "$target" fetch "$bundle_path" main
+            git -C "$target" merge --ff-only FETCH_HEAD
+          fi
+          REMOTE
