@@ -72,7 +72,7 @@ Configure branch rules for `main` on GitHub to require pull requests and the
 and restrict updates to pull requests. Apply the same required status check to
 `dev` so feature branches are tested before joining the shared development
 branch. Restrict the release pull request's base to `main` and its source to
-`dev` as a team convention. The CI workflow runs on pushes to `dev` and `main
+`dev` as a team convention. The CI workflow runs on pushes to `dev` and `main`
 and on pull requests targeting either branch.
 
 GitHub branch protection/rulesets are repository settings, not files in this
