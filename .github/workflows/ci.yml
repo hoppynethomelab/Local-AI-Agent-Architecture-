@@ -34,7 +34,14 @@ jobs:
           for file in \
             ".project_docs/Development Workflow.md" \
             ".project_docs/Local AI Agent Architecture Guide.md" \
-            ".project_docs/Multi-Agent AI Workflow.html"
+            ".project_docs/Multi-Agent AI Workflow.html" \
+            ".project_docs/Agent Operating Model.md" \
+            ".github/copilot-instructions.md" \
+            ".github/agents/LICENSE" \
+            ".github/agents/business.agent.md" \
+            ".github/agents/project-manager.agent.md" \
+            ".github/agents/engineering-supervisor.agent.md" \
+            ".github/agents/qa.agent.md"
           do
             if [ ! -s "$file" ]; then
               echo "::error file=$file::Expected documentation file is missing or empty"
