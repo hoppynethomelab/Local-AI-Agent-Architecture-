@@ -68,7 +68,6 @@ jobs:
         env:
           PROD_SSH_HOST: git-hub.hoppynet.co.uk
           PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
-          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           PROD_ACCESS_CLIENT_ID: ${{ secrets.PROD_ACCESS_CLIENT_ID }}
           PROD_ACCESS_CLIENT_SECRET: ${{ secrets.PROD_ACCESS_CLIENT_SECRET }}
           GITHUB_RUN_ID: ${{ github.run_id }}
