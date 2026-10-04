@@ -25,19 +25,32 @@ jobs:
 
       - name: Validate deployment secrets
         env:
-          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
           PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
           PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_ACCESS_CLIENT_ID: ${{ secrets.PROD_ACCESS_CLIENT_ID }}
+          PROD_ACCESS_CLIENT_SECRET: ${{ secrets.PROD_ACCESS_CLIENT_SECRET }}
         run: |
           set -eu
-          if [ -z "$PROD_SSH_HOST" ] || \
-             [ -z "$PROD_SSH_USER" ] || \
+          if [ -z "$PROD_SSH_USER" ] || \
              [ -z "$PROD_SSH_PRIVATE_KEY" ] || \
-             [ -z "$PROD_SSH_KNOWN_HOSTS" ]; then
-            echo "::error::Configure PROD_SSH_HOST, PROD_SSH_USER, PROD_SSH_PRIVATE_KEY, and PROD_SSH_KNOWN_HOSTS in the production environment"
+             [ -z "$PROD_SSH_KNOWN_HOSTS" ] || \
+             [ -z "$PROD_ACCESS_CLIENT_ID" ] || \
+             [ -z "$PROD_ACCESS_CLIENT_SECRET" ]; then
+            echo "::error::Configure PROD_SSH_USER, PROD_SSH_PRIVATE_KEY, PROD_SSH_KNOWN_HOSTS, PROD_ACCESS_CLIENT_ID, and PROD_ACCESS_CLIENT_SECRET in the production environment"
             exit 1
           fi
+
+      - name: Install cloudflared
+        run: |
+          set -eu
+          sudo install -d -m 0755 /usr/share/keyrings
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+            | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' \
+            | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes cloudflared
 
       - name: Prepare SSH and repository bundle
         env:
@@ -53,24 +66,63 @@ jobs:
 
       - name: Deploy main to production directory
         env:
-          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_HOST: git-hub.hoppynet.co.uk
           PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_ACCESS_CLIENT_ID: ${{ secrets.PROD_ACCESS_CLIENT_ID }}
+          PROD_ACCESS_CLIENT_SECRET: ${{ secrets.PROD_ACCESS_CLIENT_SECRET }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           ssh_options=(
             -i "$RUNNER_TEMP/deploy-ssh/id"
             -o BatchMode=yes
             -o StrictHostKeyChecking=yes
             -o "UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts"
+            -o "HostKeyAlias=$PROD_SSH_HOST"
           )
-          destination="$PROD_SSH_USER@$PROD_SSH_HOST"
           bundle_path="/tmp/local-ai-agent-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bundle"
+          cloudflared_log="$RUNNER_TEMP/cloudflared-access.log"
 
-          scp "${ssh_options[@]}" "$RUNNER_TEMP/repository.bundle" "$destination:$bundle_path"
-          ssh "${ssh_options[@]}" "$destination" bash -s -- "$bundle_path" <<'REMOTE'
+          cloudflared access tcp \
+            --hostname "$PROD_SSH_HOST" \
+            --url 127.0.0.1:2222 \
+            --service-token-id "$PROD_ACCESS_CLIENT_ID" \
+            --service-token-secret "$PROD_ACCESS_CLIENT_SECRET" \
+            >"$cloudflared_log" 2>&1 &
+          cloudflared_pid=$!
+          cleanup() {
+            kill "$cloudflared_pid" 2>/dev/null || true
+            wait "$cloudflared_pid" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/deploy-ssh/id" \
+              "$RUNNER_TEMP/deploy-ssh/known_hosts" \
+              "$RUNNER_TEMP/repository.bundle" \
+              "$cloudflared_log"
+          }
+          trap cleanup EXIT
+
+          proxy_ready=false
+          for attempt in {1..30}; do
+            if ! kill -0 "$cloudflared_pid" 2>/dev/null; then
+              echo "::error::Cloudflare Access TCP proxy exited before becoming ready"
+              exit 1
+            fi
+            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222' 2>/dev/null; then
+              proxy_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$proxy_ready" != true ]; then
+            echo "::error::Cloudflare Access TCP proxy did not become ready"
+            exit 1
+          fi
+
+          scp_options=("${ssh_options[@]}" -P 2222)
+          destination="$PROD_SSH_USER@127.0.0.1"
+          scp "${scp_options[@]}" "$RUNNER_TEMP/repository.bundle" "$destination:$bundle_path"
+          ssh "${ssh_options[@]}" -p 2222 "$destination" bash -s -- "$bundle_path" <<'REMOTE'
           set -eu
           bundle_path=$1
           target=/opt/local_ai_agent_prod
