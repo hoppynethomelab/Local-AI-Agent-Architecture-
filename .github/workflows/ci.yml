@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  repository-checks:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check documentation files
+        run: |
+          set -eu
+          for file in \
+            ".project_docs/Development Workflow.md" \
+            ".project_docs/Local AI Agent Architecture Guide.md" \
+            ".project_docs/Multi-Agent AI Workflow.html"
+          do
+            if [ ! -s "$file" ]; then
+              echo "::error file=$file::Expected documentation file is missing or empty"
+              exit 1
+            fi
+          done
+
+      - name: Check Python source and tests
+        run: |
+          set -eu
+          if find . -path ./.git -prune -o -type f -name '*.py' -print -quit | grep -q .; then
+            python -m compileall -q .
+            python -m pip install pytest
+            if ! find tests -type f -name 'test_*.py' -print -quit | grep -q .; then
+              echo "::error::Python source exists, but no tests/test_*.py files were found"
+              exit 1
+            fi
+            python -m pytest -q
+          else
+            echo "No Python source exists yet; documentation smoke checks are the current test suite."
+          fi
+
+      - name: Check patch whitespace
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            git diff --check "origin/${GITHUB_BASE_REF}...HEAD"
+          elif [ "${GITHUB_REF_NAME}" != "main" ]; then
+            git diff --check "origin/main...HEAD"
+          else
+            git diff --check HEAD^ HEAD
+          fi
