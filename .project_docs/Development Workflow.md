@@ -34,25 +34,36 @@ checks as sufficient for that code.
 ## Production deployment setup
 
 `.github/workflows/deploy-production.yml` deploys only after a push to `main`.
-It uses a GitHub-hosted runner over SSH to send a Git bundle and fast-forward
-the server checkout at `/opt/local_ai_agent_prod`. It refuses to overwrite a
-non-empty directory that is not already a Git checkout, and refuses to deploy
-if the production checkout is on another branch or cannot fast-forward.
+It installs Cloudflare's `cloudflared` client on the GitHub-hosted runner,
+creates an Access-authenticated TCP connection to `git-hub.hoppynet.co.uk`,
+and uses SSH to send a Git bundle and fast-forward the server checkout at
+`/opt/local_ai_agent_prod`. The workflow refuses to overwrite a non-empty
+directory that is not already a Git checkout, and refuses to deploy if the
+production checkout is on another branch or cannot fast-forward.
 
 Before the first deployment:
 
-1. Confirm the GitHub-hosted runner can reach the server over SSH.
+1. Confirm the Cloudflare Tunnel is healthy and its published application route
+   sends `git-hub.hoppynet.co.uk` to the production server's SSH service on port
+   22. Protect that hostname with a Cloudflare Access Self-hosted application
+   and a Service Auth policy restricted to the service token used by GitHub
+   Actions.
 2. Create a GitHub Actions environment named `production` and configure these
    environment secrets:
-   - `PROD_SSH_HOST`: server hostname or address.
    - `PROD_SSH_USER`: SSH account with permission to update the production
      directory.
    - `PROD_SSH_PRIVATE_KEY`: private key for that account.
-   - `PROD_SSH_KNOWN_HOSTS`: verified `known_hosts` entry for the server. Verify
-     the host key fingerprint through a trusted channel; do not trust an
-     unverified key scan.
-3. Ensure Git is installed on the server and the SSH account can write to
-   `/opt/local_ai_agent_prod`.
+   - `PROD_SSH_KNOWN_HOSTS`: verified SSH host-key entry for
+     `git-hub.hoppynet.co.uk` (the SSH host key, not a Cloudflare Access key).
+   - `PROD_ACCESS_CLIENT_ID`: Cloudflare Access service-token client ID.
+   - `PROD_ACCESS_CLIENT_SECRET`: Cloudflare Access service-token client
+     secret.
+3. Ensure the tunnel connector can reach the server's SSH service and the SSH
+   account can write to `/opt/local_ai_agent_prod`. Verify the server host-key
+   fingerprint through a trusted channel; do not trust an unverified key scan.
+
+Do not commit or paste any private key or service-token secret into the
+repository or chat. Rotate the Cloudflare service token if its secret is lost.
 
 ## Repository settings to enable
 
@@ -61,7 +72,7 @@ Configure branch rules for `main` on GitHub to require pull requests and the
 and restrict updates to pull requests. Apply the same required status check to
 `dev` so feature branches are tested before joining the shared development
 branch. Restrict the release pull request's base to `main` and its source to
-`dev` as a team convention. The CI workflow runs on pushes to `dev` and `main`
+`dev` as a team convention. The CI workflow runs on pushes to `dev` and `main
 and on pull requests targeting either branch.
 
 GitHub branch protection/rulesets are repository settings, not files in this
