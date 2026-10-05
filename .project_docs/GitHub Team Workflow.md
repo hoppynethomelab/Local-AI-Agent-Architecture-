@@ -42,9 +42,8 @@ forecasts from points until completed work and actual capacity are recorded.
 
 ## Delivery board design
 
-The repository currently has **no linked GitHub Project**. Create one from the
-repository Projects tab and link it here. Use a single team project as the
-source of delivery status, rather than maintaining multiple competing boards.
+Use the linked **Local AI Agent** Project as the source of delivery status rather
+than maintaining multiple competing boards.
 
 Recommended fields:
 
@@ -55,25 +54,18 @@ Recommended fields:
 - **Milestone:** use the existing roadmap milestones.
 - **Assignees:** use GitHub's assignee field as the owner.
 
-Recommended saved views:
+Saved views currently provided:
 
-1. **Team board:** board grouped by Status, sorted by Priority then Milestone;
-   show assignees, estimate, and milestone on each card.
-2. **My after-hours tasks:** table filtered to open items assigned to the current
-   user; sort by priority and estimate so a short task is easy to pick up.
-3. **Ready to start:** open, unblocked work with a clear owner and acceptance
-   criteria; hide epics/features unless they have a directly executable task.
-4. **Blocked / needs owner:** blocked issues or items awaiting a business,
-   infrastructure, access, or security decision.
-5. **QA / release:** items In review or In test, plus issues linked to the next
-   release milestone.
-6. **Roadmap:** group by milestone and show parent/child hierarchy and progress.
+1. **All Work:** full project table and backlog.
+2. **Team Board — Kanban:** board grouped by Status.
+3. **Ready to Start**, **In Progress**, and **In Test / QA:** status-filtered queues.
+4. **My Tasks:** table filtered to open work assigned to the current user.
 
-For charts, start with **open work by Status**, **open estimated hours by
-assignee**, and **completed issues by week/milestone**. A burnup/burndown view
-is meaningful only when issue completion dates and estimates are maintained;
-show it as a trend, not a promise, until several weeks of actual throughput are
-available. Keep the chart's scope explicit (for example, one milestone).
+For charts, use **Work by Status** for the current item breakdown and **Burn up**
+for work growth/completion over time. A burnup/burndown view is meaningful only
+when issue completion dates and estimates are maintained; show it as a trend,
+not a promise, until several weeks of actual throughput are available. Keep the
+chart's scope explicit (for example, one milestone).
 
 ## Wiki structure
 
@@ -98,12 +90,19 @@ issue set:
 The `Team ops notifications` workflow listens for completed CI and production
 workflows. It posts failed CI checks and every production deployment result to
 the Team Ops Discussion with the branch, short commit ID, result, and Actions
-run link. It deliberately does not copy raw logs or secrets. Open the linked run
-for detailed diagnostics; post any sanitized diagnosis or owner action in the
-same discussion and update the affected issue.
+run link. If the repository Actions secret `DISCORD_WEBHOOK_URL` is configured,
+it also posts the same safe summary to the configured Discord channel. The
+Discord webhook provides **one-way alerts only**; it does not connect an
+assistant account for two-way Discord conversations. If the secret is missing,
+the workflow logs a notice and skips the Discord post. Never put the webhook
+URL in source code, issues, Discussions, or the Wiki; add it as a repository
+Actions secret and rotate it if exposed. The notifications deliberately exclude
+raw logs and secret values. Open the linked run for detailed diagnostics; post
+any sanitized diagnosis or owner action in the Team Ops discussion and update
+the affected issue.
 
 For work status, use the Project Status field and add an issue comment at
 start, substantial progress, blocker, QA handoff, and completion. **In test**
-means QA is actively evaluating acceptance criteria; a green CI check alone
-is not a QA pass. Close issues only after their acceptance criteria and required
+means QA is actively evaluating acceptance criteria; a green CI check alone is
+not a QA pass. Close issues only after their acceptance criteria and required
 QA evidence are satisfied.
