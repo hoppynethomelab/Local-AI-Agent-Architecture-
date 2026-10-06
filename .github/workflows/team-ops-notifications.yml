@@ -1,0 +1,158 @@
+name: Team ops notifications
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Deploy production
+    types:
+      - completed
+
+permissions:
+  actions: read
+  discussions: write
+
+jobs:
+  notify:
+    name: Publish status to Team Ops discussion
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.name == 'Deploy production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post safe run summary to team discussion
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const owner = context.repo.owner;
+            const name = context.repo.repo;
+            const discussionTitle = 'Team Ops — CI, Deployments, Blockers & Handoffs';
+            const result = run.conclusion || 'unknown';
+            const categoryName = 'Announcements';
+
+            const data = await github.graphql(
+              `query($owner: String!, $name: String!) {
+                repository(owner: $owner, name: $name) {
+                  id
+                  discussionCategories(first: 100) {
+                    nodes { id name }
+                  }
+                  discussions(first: 100) {
+                    nodes { id title url }
+                  }
+                }
+              }`,
+              { owner, name }
+            );
+            const repository = data.repository;
+            const category = repository.discussionCategories.nodes.find(
+              item => item.name === categoryName
+            );
+            if (!category) {
+              throw new Error(`Repository discussion category '${categoryName}' was not found`);
+            }
+
+            let discussion = repository.discussions.nodes.find(
+              item => item.title === discussionTitle
+            );
+            if (!discussion) {
+              const created = await github.graphql(
+                `mutation($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+                  createDiscussion(input: {
+                    repositoryId: $repositoryId,
+                    categoryId: $categoryId,
+                    title: $title,
+                    body: $body
+                  }) {
+                    discussion { id title url }
+                  }
+                }`,
+                {
+                  repositoryId: repository.id,
+                  categoryId: category.id,
+                  title: discussionTitle,
+                  body: 'Automated team status updates for failed CI runs and production deployments. Do not post secrets or sensitive logs.'
+                }
+              );
+              discussion = created.createDiscussion.discussion;
+            }
+
+            const failedChecks = run.name === 'CI' && result === 'failure';
+            const label = failedChecks ? 'CI checks failed' : `Production deployment ${result}`;
+            const eventLabel = run.event === 'pull_request' ? 'pull request checks' : run.event;
+            const body = [
+              `### ${label}`,
+              '',
+              `- Workflow: ${run.name}`,
+              `- Result: ${result}`,
+              `- Trigger: ${eventLabel}`,
+              `- Branch: \`${run.head_branch}\``,
+              `- Commit: \`${run.head_sha.slice(0, 12)}\``,
+              `- [Open workflow run](${run.html_url})`,
+              '',
+              'Detailed diagnostics are in the linked Actions run. This automated notice intentionally excludes logs, secret values, and environment data.'
+            ].join('\n');
+
+            const posted = await github.graphql(
+              `mutation($discussionId: ID!, $body: String!) {
+                addDiscussionComment(input: {discussionId: $discussionId, body: $body}) {
+                  comment { url }
+                }
+              }`,
+              { discussionId: discussion.id, body }
+            );
+            core.info(`Posted status update: ${posted.addDiscussionComment.comment.url}`);
+
+  notify-discord:
+    name: Send status alert to Discord
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.name == 'Deploy production'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check Discord webhook configuration
+        id: discord-config
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Discord alert skipped; configure the DISCORD_WEBHOOK_URL Actions secret to enable channel notifications."
+          fi
+
+      - name: Post safe workflow summary to Discord
+        if: steps.discord-config.outputs.configured == 'true'
+        uses: actions/github-script@v7
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const result = run.conclusion || 'unknown';
+            const failedChecks = run.name === 'CI' && result === 'failure';
+            const label = failedChecks ? 'CI checks failed' : `Production deployment ${result}`;
+            const message = [
+              `**${label}**`,
+              `Workflow: ${run.name}`,
+              `Result: ${result}`,
+              `Branch: ${run.head_branch}`,
+              `Commit: ${run.head_sha.slice(0, 12)}`,
+              `[Open workflow run](${run.html_url})`
+            ].join('\n');
+
+            const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                content: message,
+                allowed_mentions: { parse: [] }
+              })
+            });
+            if (!response.ok) {
+              throw new Error(`Discord webhook returned HTTP ${response.status}`);
+            }
+            core.info('Posted workflow status notification to Discord.');
