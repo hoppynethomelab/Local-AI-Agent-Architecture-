@@ -29,9 +29,14 @@ jobs:
           PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
           PROD_ACCESS_CLIENT_ID: ${{ secrets.PROD_ACCESS_CLIENT_ID }}
-          PROD_ACCESS_CLIENT_SECRET: ${{ secrets.PROD_ACCESS_CLIENT_SECRET }}
+          PROD_ACCESS_CLIENT_SECRET: ${{ secrets.PROD_ACCESS_CLIENT_SECRET }}        
         run: |
           set -eu
+          echo "$PROD_SSH_USER  \n"
+          echo "$PROD_SSH_KNOWN_HOSTS  \n"
+          echo "$PROD_ACCESS_CLIENT_ID  \n"
+          echo "$PROD_ACCESS_CLIENT_SECRET"
+          
           if [ -z "$PROD_SSH_USER" ] || \
              [ -z "$PROD_SSH_PRIVATE_KEY" ] || \
              [ -z "$PROD_SSH_KNOWN_HOSTS" ] || \
